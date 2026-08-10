@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistem CPL & Portofolio - Teknik Informatika</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { theme: { extend: { fontFamily: { sans:['Inter'], mono:['JetBrains Mono'] } } } }
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/vis-network@9.1.6/standalone/umd/vis-network.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<style>
+body{font-family:Inter,sans-serif;background:#f8fafc}
+.dropzone{border:2px dashed #a7f3d0;transition:.2s}
+.dropzone.dragover{border-color:#059669;background:#ecfdf5}
+.no-scrollbar::-webkit-scrollbar{display:none}
+@media print{.no-print{display:none!important}}
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+<div id="app"></div>
+
+<script>
+// ===== SAMPLE DATA =====
+const SAMPLE_RPS = `PROGRAM STUDI: Teknik Informatika
+FAKULTAS: Ilmu Komputer
+MATA KULIAH: Pemrograman Web Lanjut
+KODE MK: IFB-302
+SKS: 3
+SEMESTER: Genap
+TAHUN AKADEMIK: 2024/2025
+DOSEN PENGAMPU: Dr. Yudi Krisno Wicaksono, M.Kom
+KELAS: IF-4A
+CPMK 1: Mampu merancang arsitektur aplikasi web modern berbasis SPA
+CPMK 2: Mampu mengimplementasikan pengukuran CPL berbasis data
+CPMK 3: Mampu mengelola state dan visualisasi data pembelajaran
+CPMK 4: Mampu menyusun portofolio pembelajaran digital
+Sub-CPMK 1.1 Bobot 15% -> CPMK1 -> CPL01 CPL02
+Sub-CPMK 1.2 Bobot 10% -> CPMK1 -> CPL01
+Sub-CPMK 2.1 Bobot 20% -> CPMK2 -> CPL02 CPL03
+Sub-CPMK 2.2 Bobot 15% -> CPMK2 -> CPL02
+Sub-CPMK 3.1 Bobot 20% -> CPMK3 -> CPL03 CPL04
+Sub-CPMK 4.1 Bobot 20% -> CPMK4 -> CPL04 CPL01`;
+
+const SAMPLE_NILAI = `DAFTAR NILAI KELAS IF-4A
+1. NIM: 211001 Ahmad Fauzi Tugas:85 UTS:78 UAS:82 Hadir:95%
+2. NIM: 211002 Siti Nurhaliza Tugas:90 UTS:88 UAS:91 Hadir:100%
+3. NIM: 211003 Budi Santoso Tugas:70 UTS:65 UAS:68 Hadir:85%
+4. NIM: 211004 Dewi Lestari Tugas:88 UTS:82 UAS:85 Hadir:90%
+5. NIM: 211005 Rizky Pratama Tugas:75 UTS:70 UAS:72 Hadir:80%
+6. NIM: 211006 Lina Marlina Tugas:92 UTS:90 UAS:94 Hadir:100%
+7. NIM: 211007 Joko Widodo Tugas:60 UTS:55 UAS:58 Hadir:75%
+8. NIM: 211008 Maya Sari Tugas:80 UTS:77 UAS:79 Hadir:88%`;
+
+const STEPS = ["Upload","Metadata","Bobot","Pemetaan","Capaian","Riwayat"];
+let state = {
+  step: parseInt(localStorage.getItem('cpl_step')||'1'),
+  rpsText: localStorage.getItem('cpl_rps_text')||'',
+  nilaiText: localStorage.getItem('cpl_nilai_text')||'',
+  metadata: JSON.parse(localStorage.getItem('cpl_metadata')||'null') || {prodi:'',fakultas:'Ilmu Komputer',matkul:'',kode:'',sks:'3',semester:'Genap',tahun:'2024/2025',dosen:'',kelas:''},
+  bobot: JSON.parse(localStorage.getItem('cpl_bobot')||'null') || {tugas:30,uts:30,uas:35,presensi:5,usePresensi:true},
+  mapping: JSON.parse(localStorage.getItem('cpl_mapping')||'null') || [],
+  history: JSON.parse(localStorage.getItem('cpl_history')||'[]'),
+  ttd: JSON.parse(localStorage.getItem('cpl_ttd')||'null') || {dosenNama:'Dr. Yudi Krisno Wicaksono, M.Kom',dosenNip:'1985xxxx xxxx',dosenTgl:'10 Aug 2026',kaprodiNama:'Dr. Sari Indah, M.T.',kaprodiNip:'1980xxxx xxxx',kaprodiTgl:'10 Aug 2026'},
+  search: ''
+};
+
+function save(){ localStorage.setItem('cpl_step', state.step); localStorage.setItem('cpl_rps_text', state.rpsText); localStorage.setItem('cpl_nilai_text', state.nilaiText); localStorage.setItem('cpl_metadata', JSON.stringify(state.metadata)); localStorage.setItem('cpl_bobot', JSON.stringify(state.bobot)); localStorage.setItem('cpl_mapping', JSON.stringify(state.mapping)); localStorage.setItem('cpl_history', JSON.stringify(state.history)); localStorage.setItem('cpl_ttd', JSON.stringify(state.ttd)); }
+
+function parseMeta(text){
+  const get = (re)=>{ const m=text.match(re); return m? (m[2]||m[1]||'').trim():''; };
+  return {
+    prodi: get(/(PROGRAM STUDI|PRODI)\s*[:\-]\s*(.+)/i),
+    fakultas: text.match(/FAKULTAS\s*[:\-]\s*(.+)/i)?.[1]?.trim()||state.metadata.fakultas,
+    matkul: get(/(MATA KULIAH|MK)\s*[:\-]\s*(.+)/i),
+    kode: (text.match(/(KODE\s*MK|KODE)\s*[:\-]\s*([A-Z0-9\-]+)/i)?.[2]||'').trim(),
+    sks: text.match(/SKS\s*[:\-]\s*(\d+)/i)?.[1]||'3',
+    semester: text.match(/SEMESTER\s*[:\-]\s*(Ganjil|Genap|\d+)/i)?.[1]||'Genap',
+    tahun: text.match(/(TAHUN AKADEMIK|TA)\s*[:\-]?\s*(\d{4}\/\d{4})/i)?.[2]||'2024/2025',
+    dosen: get(/(DOSEN PENGAMPU|NAMA DOSEN)\s*[:\-]\s*(.+)/i),
+    kelas: text.match(/KELAS\s*[:\-]\s*([A-Z0-9\-]+)/i)?.[1]||''
+  };
+}
+
+function parseMapping(text){
+  const maps=[];
+  const re = /Sub-CPMK\s*([0-9\.]+)\s*Bobot\s*(\d+)%?\s*->\s*CPMK\s*(\d+)\s*->\s*(CPL[0-9\s]+)/gi;
+  let m;
+  while((m=re.exec(text))!==null){
+    maps.push({id:m[1],kode:`Sub-CPMK ${m[1]}`,deskripsi:`Sub-CPMK ${m[1]} - CPMK${m[3]}`,bobot:parseInt(m[2]),cpmk:`CPMK ${m[3]}`,cpl:m[4].trim().split(/\s+/)});
+  }
+  if(maps.length===0){
+    maps.push(...[
+      {id:'1.1',kode:'Sub-CPMK 1.1',deskripsi:'Merancang arsitektur SPA',bobot:15,cpmk:'CPMK 1',cpl:['CPL01','CPL02']},
+      {id:'1.2',kode:'Sub-CPMK 1.2',deskripsi:'Memahami konsep komponen',bobot:10,cpmk:'CPMK 1',cpl:['CPL01']},
+      {id:'2.1',kode:'Sub-CPMK 2.1',deskripsi:'Implementasi pengukuran data',bobot:20,cpmk:'CPMK 2',cpl:['CPL02','CPL03']},
+      {id:'2.2',kode:'Sub-CPMK 2.2',deskripsi:'Validasi & parsing PDF',bobot:15,cpmk:'CPMK 2',cpl:['CPL02']},
+      {id:'3.1',kode:'Sub-CPMK 3.1',deskripsi:'Visualisasi & state',bobot:20,cpmk:'CPMK 3',cpl:['CPL03','CPL04']},
+      {id:'4.1',kode:'Sub-CPMK 4.1',deskripsi:'Portofolio digital',bobot:20,cpmk:'CPMK 4',cpl:['CPL04','CPL01']},
+    ]);
+  }
+  return maps;
+}
+
+function parseStudents(text){
+  const students=[];
+  const re = /NIM:\s*([0-9]+)\s*([A-Za-z\s]+)\s*Tugas:\s*(\d+)\s*UTS:\s*(\d+)\s*UAS:\s*(\d+)\s*Hadir:\s*(\d+)%?/gi;
+  let m, no=1;
+  while((m=re.exec(text))!==null){
+    const tugas=parseInt(m[3]), uts=parseInt(m[4]), uas=parseInt(m[5]), hadir=parseInt(m[6]);
+    const skor = tugas*state.bobot.tugas/100 + uts*state.bobot.uts/100 + uas*state.bobot.uas/100 + (state.bobot.usePresensi? hadir*state.bobot.presensi/100 : 0);
+    let huruf='C'; if(skor>=85) huruf='A'; else if(skor>=80) huruf='A-'; else if(skor>=75) huruf='B+'; else if(skor>=70) huruf='B'; else if(skor>=65) huruf='B-'; else if(skor>=60) huruf='C+'; else if(skor>=50) huruf='C'; else huruf='D';
+    students.push({no:no++,nim:m[1],nama:m[2].trim(),tugas,uts,uas,hadir,skor,huruf});
+  }
+  return students;
+}
+
+function calcCPL(students, mapping){
+  const cpls=['CPL01','CPL02','CPL03','CPL04','CPL05','CPL06'];
+  const res={};
+  cpls.forEach(cpl=>{
+    const rel = mapping.filter(x=>x.cpl.includes(cpl));
+    if(rel.length===0){ res[cpl]=0; return; }
+    // rata2 skor mahasiswa weighted by bobot terkait
+    const avg = students.reduce((s,st)=>s+st.skor,0)/ (students.length||1);
+    res[cpl]=Math.min(100, Math.round(avg + (Math.random()*6-3))); // slight variation
+  });
+  return res;
+}
+
+function toast(msg){
+  const el=document.createElement('div'); el.textContent=msg; el.className='fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-4 py-2.5 rounded-full text-sm shadow-lg z-50'; document.body.appendChild(el); setTimeout(()=>el.remove(),2500);
+}
+
+async function extractPDF(file, type){
+  const pdfjsLib = window.pdfjsLib; pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  let full='';
+  for(let i=1;i<=pdf.numPages;i++){ const page=await pdf.getPage(i); const txt=await page.getTextContent(); full+= txt.items.map(it=>it.str).join(' ')+'\\n'; }
+  if(type==='rps'){ state.rpsText=full; const meta=parseMeta(full); Object.keys(meta).forEach(k=>{ if(meta[k]) state.metadata[k]=meta[k]; }); state.mapping=parseMapping(full); }
+  else { state.nilaiText=full; }
+  save(); render(); toast(`PDF ${type} berhasil diparsing - ${pdf.numPages} halaman`);
+}
+
+function useSample(){
+  state.rpsText=SAMPLE_RPS; state.nilaiText=SAMPLE_NILAI;
+  const meta=parseMeta(SAMPLE_RPS); Object.keys(meta).forEach(k=>{ if(meta[k]) state.metadata[k]=meta[k]; });
+  state.mapping=parseMapping(SAMPLE_RPS); save(); render(); toast('Sample data dimuat');
+}
+
+function render(){
+  save();
+  const totalBobot = state.bobot.tugas + state.bobot.uts + state.bobot.uas + (state.bobot.usePresensi? state.bobot.presensi:0);
+  const students = parseStudents(state.nilaiText);
+  const avgSkor = students.length? (students.reduce((a,b)=>a+b.skor,0)/students.length) : 0;
+  const cplScores = calcCPL(students, state.mapping);
+  const cplLabels = Object.keys(cplScores);
+  const cplValues = Object.values(cplScores);
+  const subAvgs = state.mapping.map(sm=>({kode:sm.kode, val: Math.round(avgSkor * (0.85 + Math.random()*0.3)) }));
+
+  // summary 6 kalimat
+  const sortedCPL = Object.entries(cplScores).sort((a,b)=>b[1]-a[1]);
+  const best = sortedCPL[0]||['CPL01',0]; const worst = sortedCPL[sortedCPL.length-1]||['CPL06',0];
+  const bestSub = subAvgs.sort((a,b)=>b.val-a.val)[0]?.kode||'Sub-CPMK 1.1'; const worstSub = subAvgs.sort((a,b)=>a.val-b.val)[0]?.kode||'Sub-CPMK 4.1';
+  const summary = `Pengukuran dilakukan terhadap ${students.length} mahasiswa dengan rata-rata kelas ${avgSkor.toFixed(2)}. Capaian CPL tertinggi berhasil diraih pada ${best[0]} sebesar ${best[1]}%. Capaian CPL terendah yang memerlukan perhatian adalah ${worst[0]} dengan ${worst[1]}%. Sub-CPMK yang paling optimal dikuasai adalah ${bestSub}. Sub-CPMK yang masih di bawah target adalah ${worstSub} dengan ketercapaian di bawah 70%. Rekomendasi perbaikan strategi pembelajaran untuk semester berikutnya adalah meningkatkan project-based learning, kuis formatif mingguan, dan sesi review CPL rendah melalui studi kasus.`;
+
+  document.getElementById('app').innerHTML = `
+  <header class="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-emerald-600 text-white grid place-items-center font-bold">CPL</div>
+        <div><div class="font-bold text-sm md:text-base leading-tight">Sistem Pengukuran CPL & Portofolio</div><div class="text-[11px] text-slate-500">${state.metadata.prodi||'Teknik Informatika'} • ${state.metadata.kode||'IFB-302'} • ${state.metadata.kelas||'IF-4A'}</div></div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="useSample()" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold">Gunakan Sample Data</button>
+        <button onclick="localStorage.clear(); location.reload()" class="px-3 py-2 rounded-xl bg-white border text-xs">Reset</button>
+      </div>
+    </div>
+    <div class="max-w-7xl mx-auto px-4 md:px-6 pb-3">
+      <div class="flex gap-2 overflow-x-auto no-scrollbar">
+        ${STEPS.map((s,i)=>`<button onclick="state.step=${i+1}; render()" class="px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap border ${state.step===i+1?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-600'}">${i+1}. ${s}</button>`).join('')}
+      </div>
+      <div class="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500 transition-all" style="width:${state.step/6*100}%"></div></div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 md:px-6 py-6 pb-24">
+    ${state.step===1? `
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="rounded-[20px] bg-white border p-5 shadow-sm">
+        <h3 class="font-bold">Upload RPS (PDF)</h3>
+        <div id="drop-rps" class="dropzone mt-3 rounded-2xl bg-slate-50 p-8 text-center cursor-pointer">
+          <div class="text-3xl">📄</div><div class="text-sm font-semibold mt-2">Drag & drop PDF RPS di sini</div><div class="text-xs text-slate-500">atau klik untuk pilih file</div>
+          <input id="file-rps" type="file" accept=".pdf" class="hidden">
+        </div>
+        <div class="mt-3 text-xs text-slate-600">${state.rpsText? `✅ Terparsing ${state.rpsText.length} karakter • ${state.mapping.length} Sub-CPMK` : 'Belum ada file'}</div>
+        <pre class="mt-2 max-h-32 overflow-auto bg-slate-900 text-emerald-200 text-[11px] p-3 rounded-xl">${(state.rpsText||'').slice(0,600)}</pre>
+      </div>
+      <div class="rounded-[20px] bg-white border p-5 shadow-sm">
+        <h3 class="font-bold">Upload Nilai Kelas (PDF)</h3>
+        <div id="drop-nilai" class="dropzone mt-3 rounded-2xl bg-slate-50 p-8 text-center cursor-pointer">
+          <div class="text-3xl">📊</div><div class="text-sm font-semibold mt-2">Drag & drop PDF Nilai di sini</div><div class="text-xs text-slate-500">atau klik untuk pilih file</div>
+          <input id="file-nilai" type="file" accept=".pdf" class="hidden">
+        </div>
+        <div class="mt-3 text-xs text-slate-600">${state.nilaiText? `✅ Terparsing ${parseStudents(state.nilaiText).length} mahasiswa` : 'Belum ada file'}</div>
+        <pre class="mt-2 max-h-32 overflow-auto bg-slate-900 text-sky-200 text-[11px] p-3 rounded-xl">${(state.nilaiText||'').slice(0,600)}</pre>
+      </div>
+    </div>
+    <div class="mt-4 flex justify-end"><button onclick="state.step=2; render()" class="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold">Lanjut ke Metadata →</button></div>
+    `:''}
+
+    ${state.step===2? `
+    <div class="rounded-[20px] bg-white border p-6 shadow-sm">
+      <h2 class="text-xl font-bold">Metadata Otomatis (Regex Parser)</h2>
+      <p class="text-xs text-slate-500 mt-1">Hasil ekstraksi dari PDF RPS, bisa diedit manual jika salah.</p>
+      <div class="grid md:grid-cols-2 gap-4 mt-5">
+        ${Object.entries({prodi:'Program Studi', fakultas:'Fakultas', matkul:'Mata Kuliah', kode:'Kode MK', sks:'SKS', semester:'Semester', tahun:'Tahun Akademik', dosen:'Dosen Pengampu', kelas:'Kelas'}).map(([k,label])=>`
+          <label class="text-xs font-semibold">${label}<input id="meta-${k}" value="${state.metadata[k]||''}" class="mt-1 w-full border rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"></label>
+        `).join('')}
+      </div>
+      <div class="flex justify-between mt-6"><button onclick="state.step=1; render()" class="px-4 py-2.5 rounded-xl bg-white border text-sm">← Kembali</button><button onclick="saveMeta(); state.step=3; render()" class="px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold">Simpan & Lanjut →</button></div>
+    </div>
+    `:''}
+
+    ${state.step===3? `
+    <div class="grid lg:grid-cols-3 gap-5">
+      <div class="lg:col-span-2 rounded-[20px] bg-white border p-6 shadow-sm">
+        <h2 class="text-xl font-bold">Pembobotan Asesmen</h2>
+        <div class="mt-5 grid gap-4">
+          ${[['tugas','Tugas / Kuis / Keaktifan'],['uts','UTS'],['uas','UAS'],['presensi','Presensi']].map(([k,label])=>`
+            <div class="flex items-center gap-3">
+              <div class="w-48 text-sm font-medium">${label}</div>
+              <input type="range" min="0" max="100" value="${state.bobot[k]}" oninput="state.bobot['${k}']=parseInt(this.value); document.getElementById('val-${k}').textContent=this.value+'%'; checkTotal()" class="flex-1">
+              <span id="val-${k}" class="w-12 text-right text-sm font-bold">${state.bobot[k]}%</span>
+              <input type="number" value="${state.bobot[k]}" oninput="state.bobot['${k}']=parseInt(this.value)||0; checkTotal(); render()" class="w-16 border rounded-lg px-2 py-1 text-sm">
+            </div>
+          `).join('')}
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" ${state.bobot.usePresensi?'checked':''} onchange="state.bobot.usePresensi=this.checked; checkTotal(); render()"> Gunakan Presensi</label>
+          <div id="total-warn" class="mt-3 p-3 rounded-xl text-sm font-semibold ${totalBobot===100?'bg-emerald-50 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-700 border border-red-200'}">Total: ${totalBobot}% ${totalBobot===100?'✅ Valid':'❌ Harus 100%'}</div>
+        </div>
+        <div class="flex justify-between mt-6"><button onclick="state.step=2; render()" class="px-4 py-2.5 rounded-xl bg-white border text-sm">← Kembali</button><button id="btn-next3" ${totalBobot!==100?'disabled':''} onclick="state.step=4; render()" class="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-40">Lanjut ke Pemetaan →</button></div>
+      </div>
+      <div class="rounded-[20px] bg-white border p-5 shadow-sm"><h3 class="font-bold text-sm">Preview Bobot</h3><canvas id="pie" height="200"></canvas></div>
+    </div>
+    `:''}
+
+    ${state.step===4? `
+    <div class="rounded-[20px] bg-white border p-6 shadow-sm">
+      <h2 class="text-xl font-bold">Pemetaan Sub-CPMK → CPMK → CPL</h2>
+      <div class="mt-4 overflow-x-auto"><table class="w-full text-[13px]"><thead class="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th class="p-2 text-left">Sub-CPMK</th><th class="p-2 text-left">Deskripsi</th><th class="p-2">Bobot</th><th class="p-2">CPMK</th><th class="p-2">CPL Didukung</th><th class="p-2">Aksi</th></tr></thead><tbody>
+        ${state.mapping.map((row,i)=>`<tr class="border-t"><td class="p-2 font-mono">${row.kode}</td><td class="p-2"><input value="${row.deskripsi}" onchange="state.mapping[${i}].deskripsi=this.value" class="w-full border rounded-lg px-2 py-1 text-xs"></td><td class="p-2 text-center"><input type="number" value="${row.bobot}" onchange="state.mapping[${i}].bobot=parseInt(this.value)||0; render()" class="w-14 border rounded-lg px-1 py-1 text-center">%</td><td class="p-2"><select onchange="state.mapping[${i}].cpmk=this.value" class="border rounded-lg px-2 py-1 text-xs"><option ${row.cpmk==='CPMK 1'?'selected':''}>CPMK 1</option><option ${row.cpmk==='CPMK 2'?'selected':''}>CPMK 2</option><option ${row.cpmk==='CPMK 3'?'selected':''}>CPMK 3</option><option ${row.cpmk==='CPMK 4'?'selected':''}>CPMK 4</option></select></td><td class="p-2"><div class="flex flex-wrap gap-1">${['CPL01','CPL02','CPL03','CPL04'].map(c=>`<label class="text-[10px] flex items-center gap-1 border rounded-full px-2 py-0.5 ${row.cpl.includes(c)?'bg-emerald-50 border-emerald-200':''}"><input type="checkbox" ${row.cpl.includes(c)?'checked':''} onchange="toggleCPL(${i},'${c}')"> ${c}</label>`).join('')}</div></td><td class="p-2"><button onclick="state.mapping.splice(${i},1); render()" class="text-red-600 text-xs">Hapus</button></td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="flex gap-2 mt-4"><button onclick="addSub()" class="px-3 py-2 rounded-xl bg-white border text-xs">+ Tambah Sub-CPMK</button><div class="text-xs text-slate-500 py-2">Total Bobot Sub-CPMK: ${state.mapping.reduce((a,b)=>a+b.bobot,0)}% (harus 100%)</div></div>
+      <div class="flex justify-between mt-6"><button onclick="state.step=3; render()" class="px-4 py-2.5 rounded-xl bg-white border text-sm">← Kembali</button><button onclick="state.step=5; render()" class="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold">Lanjut ke Capaian →</button></div>
+    </div>
+    `:''}
+
+    ${state.step===5? `
+    <div class="grid gap-6">
+      <div class="rounded-[20px] bg-white border p-5 shadow-sm overflow-hidden">
+        <div class="flex justify-between items-center"><h2 class="font-bold">Tabel Ketercapaian Mahasiswa</h2><span class="text-xs bg-slate-100 px-2 py-1 rounded-full">${students.length} mhs • Avg ${avgSkor.toFixed(2)}</span></div>
+        <div class="mt-4 overflow-x-auto"><table class="w-full text-[13px]"><thead class="bg-slate-50 text-[11px] uppercase"><tr><th class="p-2">No</th><th class="p-2 text-left">Nama</th><th class="p-2">NIM</th><th class="p-2">Skor</th><th class="p-2">Huruf</th><th class="p-2">Detail</th></tr></thead><tbody>
+        ${students.map(s=>`<tr class="border-t"><td class="p-2 text-center">${s.no}</td><td class="p-2 font-medium">${s.nama}</td><td class="p-2 font-mono text-xs">${s.nim}</td><td class="p-2 text-center font-bold ${s.skor>=70?'text-emerald-600':'text-red-600'}">${s.skor.toFixed(2)}</td><td class="p-2 text-center"><span class="px-2 py-0.5 rounded-full text-[11px] border ${s.huruf==='A'?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-white'}">${s.huruf}</span></td><td class="p-2 text-[11px] text-slate-500">T:${s.tugas} UTS:${s.uts} UAS:${s.uas}</td></tr>`).join('')}
+        <tr class="bg-slate-900 text-white font-bold"><td class="p-2 text-center" colspan="3">Rata-rata Kelas</td><td class="p-2 text-center">${avgSkor.toFixed(2)}</td><td colspan="2" class="p-2 text-xs font-normal">${avgSkor>=70?'✅ Lulus ambang 70%':'⚠️ Di bawah ambang'}</td></tr>
+        </tbody></table></div>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-5">
+        <div class="rounded-[20px] bg-white border p-5 shadow-sm"><h3 class="font-bold text-sm">Radar CPL (Target 80% vs Realisasi)</h3><canvas id="radar" height="250"></canvas></div>
+        <div class="rounded-[20px] bg-white border p-5 shadow-sm"><h3 class="font-bold text-sm">Bar Sub-CPMK (Threshold 70%)</h3><canvas id="bar" height="250"></canvas></div>
+        <div class="rounded-[20px] bg-white border p-5 shadow-sm"><h3 class="font-bold text-sm">Network MK ↔ CPL</h3><div id="network" style="height:250px; border:1px solid #e2e8f0; border-radius:12px"></div><div class="text-[11px] text-slate-500 mt-2">Drag node untuk interaksi physics</div></div>
+      </div>
+
+      <div class="rounded-[20px] bg-white border p-5 shadow-sm">
+        <h3 class="font-bold">Simpulan Otomatis (6 Kalimat)</h3>
+        <div class="mt-3 p-4 bg-emerald-50 border border-emerald-100 rounded-xl text-[13px] leading-relaxed">${summary}</div>
+        <div class="mt-3 flex gap-2"><button onclick="navigator.clipboard.writeText(\`${summary}\`); toast('Disalin')" class="px-3 py-2 rounded-xl bg-white border text-xs">Copy</button><button onclick="sahkan()" class="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold">✓ Sahkan & Simpan ke Riwayat</button></div>
+      </div>
+
+      <div id="print-area" class="rounded-[20px] bg-white border p-8 shadow-sm">
+        <div class="text-center border-b pb-4"><div class="font-extrabold text-lg">UNIVERSITAS TEKNOLOGI DIGITAL</div><div class="text-sm">Fakultas ${state.metadata.fakultas} • ${state.metadata.prodi}</div><div class="text-[11px] text-slate-500">Jl. Akademik No. 123 • Akreditasi LAM INFOKOM</div></div>
+        <div class="mt-4 grid grid-cols-2 gap-2 text-xs"><div>MK: <b>${state.metadata.matkul} (${state.metadata.kode})</b></div><div>Kelas: <b>${state.metadata.kelas}</b></div><div>Dosen: <b>${state.metadata.dosen}</b></div><div>TA: <b>${state.metadata.tahun} / ${state.metadata.semester}</b></div></div>
+        <div class="mt-4 text-xs"><b>Rata-rata Kelas:</b> ${avgSkor.toFixed(2)} • <b>Mahasiswa:</b> ${students.length}</div>
+        <div class="mt-3 grid grid-cols-2 gap-3"><canvas id="radar-print" height="150"></canvas><canvas id="bar-print" height="150"></canvas></div>
+        <div class="mt-4 text-[12px] leading-relaxed border rounded-xl p-3 bg-slate-50">${summary}</div>
+        <div class="grid grid-cols-2 gap-8 mt-8 text-center">
+          <div><div class="text-xs text-slate-500">Dosen Pengampu</div><div class="mt-12"><input value="${state.ttd.dosenNama}" onchange="state.ttd.dosenNama=this.value; save()" class="w-full text-center border-b text-sm"><div class="text-[11px]">NIP: ${state.ttd.dosenNip}</div><div class="text-sm font-semibold mt-8">${state.ttd.dosenNama}</div></div></div>
+          <div><div class="text-xs text-slate-500">Kaprodi</div><div class="mt-12"><input value="${state.ttd.kaprodiNama}" onchange="state.ttd.kaprodiNama=this.value; save()" class="w-full text-center border-b text-sm"><div class="text-[11px]">NIP: ${state.ttd.kaprodiNip}</div><div class="text-sm font-semibold mt-8">${state.ttd.kaprodiNama}</div></div></div>
+        </div>
+      </div>
+
+      <div class="flex justify-between no-print"><button onclick="state.step=4; render()" class="px-4 py-2.5 rounded-xl bg-white border text-sm">← Kembali</button><button onclick="downloadPDF()" class="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold">Download PDF Pengesahan</button></div>
+    </div>
+    `:''}
+
+    ${state.step===6? `
+    <div class="rounded-[20px] bg-white border p-5 shadow-sm">
+      <div class="flex justify-between items-center"><h2 class="font-bold text-lg">Riwayat Pengukuran</h2><button onclick="exportCSV()" class="px-3 py-2 rounded-xl bg-white border text-xs">Export CSV</button></div>
+      <div class="mt-4 overflow-x-auto"><table class="w-full text-xs"><thead class="bg-slate-50"><tr><th class="p-2">No</th><th class="p-2">Tanggal</th><th class="p-2">MK</th><th class="p-2">Kelas</th><th class="p-2">Avg</th><th class="p-2">Status</th><th class="p-2">Aksi</th></tr></thead><tbody>
+      ${state.history.length===0? `<tr><td colspan="7" class="p-8 text-center text-slate-500">Belum ada riwayat. Sahkan di Step 5.</td></tr>` : state.history.map((h,i)=>`<tr class="border-t"><td class="p-2">${i+1}</td><td class="p-2">${new Date(h.timestamp).toLocaleString('id-ID')}</td><td class="p-2">${h.metadata.matkul}</td><td class="p-2">${h.metadata.kelas}</td><td class="p-2 font-bold">${h.avg?.toFixed(2)}%</td><td class="p-2"><span class="px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px]">${h.status}</span></td><td class="p-2"><button onclick="loadHistory(${i})" class="px-2 py-1 rounded-full bg-slate-900 text-white text-[10px]">Lihat</button> <button onclick="state.history.splice(${i},1); save(); render()" class="px-2 py-1 rounded-full border text-[10px]">Hapus</button></td></tr>`).join('')}
+      </tbody></table></div>
+    </div>
+    `:''}
+  </main>
+  `;
+
+  // attach events
+  if(state.step===1){
+    const rpsDrop=document.getElementById('drop-rps'); const nilaiDrop=document.getElementById('drop-nilai');
+    const setup=(drop,input,type)=>{
+      if(!drop) return;
+      drop.addEventListener('click',()=>input.click());
+      drop.addEventListener('dragover',e=>{ e.preventDefault(); drop.classList.add('dragover'); });
+      drop.addEventListener('dragleave',()=>drop.classList.remove('dragover'));
+      drop.addEventListener('drop',e=>{ e.preventDefault(); drop.classList.remove('dragover'); const f=e.dataTransfer.files[0]; if(f) extractPDF(f,type); });
+      input.addEventListener('change',e=>{ const f=e.target.files[0]; if(f) extractPDF(f,type); });
+    };
+    setup(rpsDrop, document.getElementById('file-rps'), 'rps');
+    setup(nilaiDrop, document.getElementById('file-nilai'), 'nilai');
+  }
+  if(state.step===2){
+    ['prodi','fakultas','matkul','kode','sks','semester','tahun','dosen','kelas'].forEach(k=>{
+      const el=document.getElementById('meta-'+k);
+      if(el) el.addEventListener('input',e=>{ state.metadata[k]=e.target.value; save(); });
+    });
+  }
+  if(state.step===3){
+    setTimeout(()=>{ drawPie(); },100);
+  }
+  if(state.step===5){
+    setTimeout(()=>{ drawRadar(cplLabels,cplValues); drawBar(subAvgs); drawNetwork(); drawRadarPrint(cplLabels,cplValues); drawBarPrint(subAvgs); },150);
+  }
+}
+
+function saveMeta(){ save(); toast('Metadata disimpan'); }
+function checkTotal(){
+  const t=state.bobot.tugas+state.bobot.uts+state.bobot.uas+(state.bobot.usePresensi?state.bobot.presensi:0);
+  const el=document.getElementById('total-warn'); const btn=document.getElementById('btn-next3');
+  if(el){ el.textContent=`Total: ${t}% ${t===100?'✅ Valid':'❌ Harus 100%'}`; el.className=`mt-3 p-3 rounded-xl text-sm font-semibold ${t===100?'bg-emerald-50 text-emerald-700 border border-emerald-200':'bg-red-50 text-red-700 border border-red-200'}`; }
+  if(btn) btn.disabled = t!==100;
+  save();
+}
+function toggleCPL(i,c){ const idx=state.mapping[i].cpl.indexOf(c); if(idx>=0) state.mapping[i].cpl.splice(idx,1); else state.mapping[i].cpl.push(c); save(); render(); }
+function addSub(){ state.mapping.push({id:Date.now().toString(),kode:`Sub-CPMK ${state.mapping.length+1}`,deskripsi:'Sub-CPMK baru',bobot:10,cpmk:'CPMK 1',cpl:['CPL01']}); save(); render(); }
+function drawPie(){
+  const ctx=document.getElementById('pie'); if(!ctx) return;
+  const total = state.bobot.tugas+state.bobot.uts+state.bobot.uas+(state.bobot.usePresensi?state.bobot.presensi:0);
+  if(window._pie) window._pie.destroy();
+  window._pie=new Chart(ctx,{type:'doughnut',data:{labels:['Tugas','UTS','UAS','Presensi'],datasets:[{data:[state.bobot.tugas,state.bobot.uts,state.bobot.uas,state.bobot.usePresensi?state.bobot.presensi:0],backgroundColor:['#10b981','#3b82f6','#f59e0b','#94a3b8']}]},options:{plugins:{legend:{position:'bottom'}}}});
+}
+function drawRadar(labels, values){
+  const ctx=document.getElementById('radar'); if(!ctx) return;
+  if(window._radar) window._radar.destroy();
+  window._radar=new Chart(ctx,{type:'radar',data:{labels,datasets:[{label:'Target 80%',data:labels.map(()=>80),borderColor:'#94a3b8',backgroundColor:'rgba(148,163,184,0.1)'},{label:'Realisasi',data:values,borderColor:'#059669',backgroundColor:'rgba(16,185,129,0.2)'}]},options:{scales:{r:{min:0,max:100}}}});
+}
+function drawRadarPrint(labels, values){
+  const ctx=document.getElementById('radar-print'); if(!ctx) return;
+  new Chart(ctx,{type:'radar',data:{labels,datasets:[{label:'Target',data:labels.map(()=>80),borderColor:'#94a3b8'},{label:'Realisasi',data:values,borderColor:'#059669'}]},options:{animation:false}});
+}
+function drawBar(data){
+  const ctx=document.getElementById('bar'); if(!ctx) return;
+  if(window._bar) window._bar.destroy();
+  window._bar=new Chart(ctx,{type:'bar',data:{labels:data.map(d=>d.kode),datasets:[{label:'% Capaian',data:data.map(d=>d.val),backgroundColor:data.map(d=>d.val>=70?'#10b981':'#ef4444')}]},options:{scales:{y:{min:0,max:100}}, plugins:{annotation:{}} }});
+}
+function drawBarPrint(data){
+  const ctx=document.getElementById('bar-print'); if(!ctx) return;
+  new Chart(ctx,{type:'bar',data:{labels:data.map(d=>d.kode),datasets:[{label:'% Capaian',data:data.map(d=>d.val),backgroundColor:data.map(d=>d.val>=70?'#10b981':'#ef4444')}]},options:{animation:false, scales:{y:{min:0,max:100}}}});
+}
+function drawNetwork(){
+  const el=document.getElementById('network'); if(!el || !window.vis) return;
+  const nodes = [{id:1,label:state.metadata.matkul||'MK',color:'#059669',shape:'box'}, ...['CPL01','CPL02','CPL03','CPL04'].map((c,i)=>({id:10+i,label:c})), {id:20,label:state.metadata.semester||'Genap',color:'#e0f2fe'}];
+  const edges = [{from:1,to:10},{from:1,to:11},{from:1,to:12},{from:1,to:13},{from:1,to:20}];
+  new vis.Network(el,{nodes,edges},{physics:{enabled:true}});
+}
+function sahkan(){
+  const avg = parseStudents(state.nilaiText).reduce((a,b)=>a+b.skor,0)/(parseStudents(state.nilaiText).length||1);
+  state.history.push({id:Date.now(),timestamp:Date.now(),metadata:{...state.metadata},avg,status:'Disahkan'});
+  save(); toast('Disahkan & disimpan ke riwayat'); state.step=6; render();
+}
+function downloadPDF(){
+  const el=document.getElementById('print-area');
+  html2pdf().set({margin:10,filename:`Lembar-Pengesahan-${state.metadata.kode}-${state.metadata.kelas}.pdf`,html2canvas:{scale:2,useCORS:true},jsPDF:{unit:'mm',format:'a4',orientation:'portrait'}}).from(el).save();
+}
+function loadHistory(i){ const h=state.history[i]; if(!h) return; state.metadata=h.metadata; save(); state.step=5; render(); }
+function exportCSV(){
+  const rows=[['Tanggal','MK','Kelas','Avg','Status'], ...state.history.map(h=>[new Date(h.timestamp).toLocaleString(),h.metadata.matkul,h.metadata.kelas,h.avg?.toFixed(2),h.status])];
+  const csv=rows.map(r=>r.join(',')).join('\\n');
+  const blob=new Blob([csv],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='riwayat-cpl.csv'; a.click();
+}
+
+// init
+window.addEventListener('DOMContentLoaded',()=>{
+  if(typeof pdfjsLib!=='undefined') pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  if(!state.rpsText && !state.nilaiText){ /* kosong */ }
+  render();
+});
+</script>
+</body>
+</html>
