@@ -1,9 +1,0 @@
-DAFTAR NILAI KELAS IF-4A
-1. NIM: 211001 Ahmad Fauzi Tugas:85 UTS:78 UAS:82 Hadir:95%
-2. NIM: 211002 Siti Nurhaliza Tugas:90 UTS:88 UAS:91 Hadir:100%
-3. NIM: 211003 Budi Santoso Tugas:70 UTS:65 UAS:68 Hadir:85%
-4. NIM: 211004 Dewi Lestari Tugas:88 UTS:82 UAS:85 Hadir:90%
-5. NIM: 211005 Rizky Pratama Tugas:75 UTS:70 UAS:72 Hadir:80%
-6. NIM: 211006 Lina Marlina Tugas:92 UTS:90 UAS:94 Hadir:100%
-7. NIM: 211007 Joko Widodo Tugas:60 UTS:55 UAS:58 Hadir:75%
-8. NIM: 211008 Maya Sari Tugas:80 UTS:77 UAS:79 Hadir:88%
